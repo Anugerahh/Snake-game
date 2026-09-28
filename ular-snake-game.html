@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ular Klasik</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg1:#0d130d; --bg2:#1b2a1c;
+    --ink:#f2efe6; --muted:#9fae8e;
+    --border:rgba(242,239,230,0.14);
+    --snake-head:#c3dba0; --snake-body:#7fa05c;
+    --food:#e59a56;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;}
+  body{
+    min-height:100%;
+    display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(circle at 50% -10%, var(--bg2), var(--bg1) 65%);
+    color:var(--ink);
+    font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+    padding:max(20px,env(safe-area-inset-top)) 16px max(20px,env(safe-area-inset-bottom));
+  }
+  .wrap{display:flex;flex-direction:column;align-items:center;gap:14px;width:100%;max-width:400px;}
+  h1{margin:0;font-family:'Fredoka',system-ui,sans-serif;font-weight:600;font-size:1.7rem;color:var(--ink);}
+  .stats{display:flex;gap:16px;}
+  .stat{background:rgba(242,239,230,0.06);border:1px solid var(--border);padding:8px 16px;border-radius:10px;font-size:0.8rem;color:var(--muted);display:flex;gap:8px;align-items:baseline;}
+  .stat span{font-family:'Fredoka',system-ui,sans-serif;color:var(--ink);font-weight:600;font-size:1.15rem;}
+  .canvas-wrap{position:relative;width:100%;max-width:360px;aspect-ratio:1;border-radius:20px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,0.45), inset 0 0 0 1px var(--border);background:linear-gradient(165deg,#1c2a17,#0a0f09);}
+  canvas{display:block;width:100%;height:100%;}
+  .overlay{position:absolute;inset:0;background:rgba(9,13,8,0.95);display:none;align-items:center;justify-content:center;text-align:center;padding:24px;}
+  .overlay.visible{display:flex;}
+  .overlay-content h2{margin:0 0 8px;font-family:'Fredoka',system-ui,sans-serif;font-weight:600;font-size:1.3rem;}
+  .overlay-content p{margin:0 0 16px;color:var(--muted);font-size:0.85rem;line-height:1.5;}
+  .hint{font-size:0.72rem;color:var(--muted);margin-top:12px !important;}
+  #start-btn{background:linear-gradient(135deg,var(--snake-head),var(--snake-body));border:none;color:#12210a;font-family:'Fredoka',system-ui,sans-serif;font-weight:600;padding:12px 30px;border-radius:999px;font-size:1rem;cursor:pointer;}
+  #start-btn:active{transform:scale(0.95);}
+  .touch-controls{display:none;flex-direction:column;align-items:center;gap:8px;}
+  @media (pointer:coarse){.touch-controls{display:flex;}}
+  .touch-controls .row{display:flex;gap:8px;}
+  .touch-controls button{width:56px;height:56px;border-radius:14px;border:1px solid var(--border);background:rgba(242,239,230,0.06);color:var(--ink);font-size:1.4rem;display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+  .touch-controls button:active{background:rgba(242,239,230,0.18);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🐍 Ular Klasik</h1>
+  <div class="stats">
+    <div class="stat">Skor <span id="score">0</span></div>
+    <div class="stat">Terbaik <span id="highscore">0</span></div>
+  </div>
+  <div class="canvas-wrap">
+    <canvas id="game" width="360" height="360"></canvas>
+    <div id="overlay" class="overlay visible">
+      <div class="overlay-content">
+        <h2 id="overlay-title">Siap Bermain?</h2>
+        <p id="overlay-text">Makan buah oranye biar badanmu tumbuh. Jangan tabrak dinding atau badan sendiri!</p>
+        <button id="start-btn">Mulai Main</button>
+        <p class="hint">Panah / WASD di keyboard, atau geser layar &amp; tombol arah di HP</p>
+      </div>
+    </div>
+  </div>
+  <div class="touch-controls">
+    <button data-dir="up" aria-label="Atas">↑</button>
+    <div class="row">
+      <button data-dir="left" aria-label="Kiri">←</button>
+      <button data-dir="down" aria-label="Bawah">↓</button>
+      <button data-dir="right" aria-label="Kanan">→</button>
+    </div>
+  </div>
+</div>
+<script>
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+const scoreEl=document.getElementById('score');
+const highscoreEl=document.getElementById('highscore');
+const overlay=document.getElementById('overlay');
+const overlayTitle=document.getElementById('overlay-title');
+const overlayText=document.getElementById('overlay-text');
+const startBtn=document.getElementById('start-btn');
+
+const GRID=18, CELL=canvas.width/GRID;
+const COLORS={food:'#e59a56',head:'#c3dba0',body:'#7fa05c'};
+
+let snake=[], direction={x:1,y:0}, nextDirection={x:1,y:0}, food={x:0,y:0};
+let score=0, highScore=0, gameLoop=null, speed=130, running=false;
+
+function loadHighScore(){
+  try{ const v=localStorage.getItem('snake-high-score'); return v?parseInt(v,10):0; }
+  catch(e){ return 0; }
+}
+function saveHighScore(v){
+  try{ localStorage.setItem('snake-high-score', v); }catch(e){}
+}
+
+function placeFood(){
+  let valid=false;
+  while(!valid){
+    food={x:Math.floor(Math.random()*GRID), y:Math.floor(Math.random()*GRID)};
+    valid=!snake.some(s=>s.x===food.x && s.y===food.y);
+  }
+}
+
+function init(){
+  snake=[{x:8,y:9},{x:7,y:9},{x:6,y:9}];
+  direction={x:1,y:0};
+  nextDirection={x:1,y:0};
+  score=0; speed=130; running=true;
+  scoreEl.textContent=score;
+  placeFood();
+  overlay.classList.remove('visible');
+  if(gameLoop) clearInterval(gameLoop);
+  gameLoop=setInterval(tick, speed);
+  draw();
+}
+
+function tick(){
+  direction=nextDirection;
+  const head={x:snake[0].x+direction.x, y:snake[0].y+direction.y};
+  if(head.x<0||head.x>=GRID||head.y<0||head.y>=GRID||snake.some(s=>s.x===head.x&&s.y===head.y)){
+    return gameOver();
+  }
+  snake.unshift(head);
+  if(head.x===food.x && head.y===food.y){
+    score++;
+    scoreEl.textContent=score;
+    placeFood();
+    if(score%5===0 && speed>60){
+      speed-=8;
+      clearInterval(gameLoop);
+      gameLoop=setInterval(tick,speed);
+    }
+  } else {
+    snake.pop();
+  }
+  draw();
+}
+
+function drawBackground(){
+  for(let x=0;x<GRID;x++){
+    for(let y=0;y<GRID;y++){
+      ctx.fillStyle=(x+y)%2===0?'rgba(242,239,230,0.02)':'rgba(242,239,230,0.045)';
+      ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+    }
+  }
+}
+
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawBackground();
+  ctx.fillStyle=COLORS.food;
+  roundRect(food.x*CELL+3, food.y*CELL+3, CELL-6, CELL-6, 6);
+  ctx.fill();
+  snake.forEach((seg,i)=>{
+    ctx.fillStyle=i===0?COLORS.head:COLORS.body;
+    roundRect(seg.x*CELL+1, seg.y*CELL+1, CELL-2, CELL-2, 5);
+    ctx.fill();
+  });
+}
+
+function gameOver(){
+  clearInterval(gameLoop);
+  running=false;
+  let record=false;
+  if(score>highScore){
+    highScore=score;
+    saveHighScore(highScore);
+    highscoreEl.textContent=highScore;
+    record=true;
+  }
+  overlayTitle.textContent=record?'Rekor Baru! 🎉':'Game Over';
+  overlayText.textContent=`Skor kamu: ${score}`+(record?' — ini rekor tertinggimu!':'. Ayo coba lagi!');
+  startBtn.textContent='Main Lagi';
+  overlay.classList.add('visible');
+}
+
+function setDirection(dx,dy){
+  if(!running) return;
+  if(nextDirection.x===-dx && nextDirection.y===-dy) return;
+  nextDirection={x:dx,y:dy};
+}
+
+document.addEventListener('keydown',(e)=>{
+  const key=e.key.toLowerCase();
+  if(['arrowup','arrowdown','arrowleft','arrowright'].includes(key)) e.preventDefault();
+  if(key==='arrowup'||key==='w') setDirection(0,-1);
+  else if(key==='arrowdown'||key==='s') setDirection(0,1);
+  else if(key==='arrowleft'||key==='a') setDirection(-1,0);
+  else if(key==='arrowright'||key==='d') setDirection(1,0);
+});
+
+document.querySelectorAll('.touch-controls button').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const dir=btn.dataset.dir;
+    if(dir==='up') setDirection(0,-1);
+    else if(dir==='down') setDirection(0,1);
+    else if(dir==='left') setDirection(-1,0);
+    else if(dir==='right') setDirection(1,0);
+  });
+});
+
+let touchStartX=0, touchStartY=0;
+canvas.addEventListener('touchstart',(e)=>{
+  touchStartX=e.touches[0].clientX;
+  touchStartY=e.touches[0].clientY;
+},{passive:true});
+canvas.addEventListener('touchend',(e)=>{
+  const dx=e.changedTouches[0].clientX-touchStartX;
+  const dy=e.changedTouches[0].clientY-touchStartY;
+  if(Math.abs(dx)>Math.abs(dy)){
+    if(Math.abs(dx)>20) setDirection(dx>0?1:-1,0);
+  } else {
+    if(Math.abs(dy)>20) setDirection(0,dy>0?1:-1);
+  }
+},{passive:true});
+
+startBtn.addEventListener('click', init);
+
+highScore=loadHighScore();
+highscoreEl.textContent=highScore;
+drawBackground();
+</script>
+</body>
+</html>
